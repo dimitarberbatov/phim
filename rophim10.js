@@ -1,84 +1,74 @@
-// Nuvio Local Scraper Plugin for RoPhim (rophim10.tv) - Optimized v2
-const BASE_URL = "https://rophim10.tv";
-const TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
+// Nuvio Local Scraper - RoPhim Legacy Compatible
+var BASE_URL = "https://rophim10.tv";
+var TMDB_KEY = "439c478a771f35c05022f9feabcca01c";
 
-const HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Referer": BASE_URL + "/",
-  "Origin": BASE_URL,
-  "Accept": "application/json, text/plain, */*"
-};
-
-async function fetchJson(url) {
-  const res = await fetch(url, { headers: HEADERS });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-async function fetchText(url) {
-  const res = await fetch(url, { headers: HEADERS });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
-}
-
-async function getTmdbInfo(tmdbId, mediaType) {
-  const type = (mediaType === "tv" || mediaType === "series") ? "tv" : "movie";
+function getStreams(tmdbId, mediaType, season, episode) {
   try {
-    const data = await fetchJson(`https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&language=vi-VN`);
-    return {
-      titleVi: data.title || data.name || "",
-      originalTitle: data.original_title || data.original_name || ""
-    };
-  } catch (e) {
-    return { titleVi: "", originalTitle: "" };
-  }
-}
-
-async function getStreams(tmdbId, mediaType = "movie", season = 1, episode = 1) {
-  try {
-    const info = await getTmdbInfo(tmdbId, mediaType);
-    const keyword = info.titleVi || info.originalTitle;
-    if (!keyword) return [];
-
-    // Tìm kiếm trực tiếp qua trang chủ hoặc cơ chế search của web
-    const searchUrl = `${BASE_URL}/tim-kiem?keyword=${encodeURIComponent(keyword)}`;
-    const html = await fetchText(searchUrl);
-
-    // Lấy link trang phim đầu tiên tìm được
-    const matchLink = html.match(/href="(\/phim\/[^"]+)"/);
-    if (!matchLink) return [];
-
-    const movieUrl = BASE_URL + matchLink[1];
-    const watchUrl = movieUrl.replace("/phim/", "/xem-phim/");
+    var type = (mediaType === "tv" || mediaType === "series") ? "tv" : "movie";
+    var tmdbUrl = "https://api.themoviedb.org/3/" + type + "/" + tmdbId + "?api_key=" + TMDB_KEY + "&language=vi-VN";
     
-    // Nếu là phim bộ, ghép thêm tham số tập
-    const finalWatchUrl = (mediaType === "tv" || mediaType === "series") 
-      ? `${watchUrl}?ver=1&ss=${season}&ep=${episode}` 
-      : watchUrl;
-
-    const watchHtml = await fetchText(finalWatchUrl);
+    var tmdbRes = fetch(tmdbUrl);
+    var tmdbData = JSON.parse(tmdbRes.text());
+    var title = tmdbData.title || tmdbData.name || "";
     
-    // Quét toàn bộ link m3u8 có trong trang xem phim
-    const m3u8Matches = watchHtml.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/g) || [];
-    const uniqueStreams = [...new Set(m3u8Matches)];
+    if (!title) return [];
 
-    return uniqueStreams.map((link, index) => ({
-      name: "RoPhim",
-      title: `RoPhim - Server ${index + 1} (1080p)`,
-      url: link.replace(/\\u002F/g, "/").replace(/\\/g, ""),
-      quality: "1080p",
+    var searchUrl = BASE_URL + "/tim-kiem?keyword=" + encodeURIComponent(title);
+    var searchRes = fetch(searchUrl, {
       headers: {
-        "Referer": BASE_URL + "/",
-        "Origin": BASE_URL,
-        "User-Agent": HEADERS["User-Agent"]
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": BASE_URL + "/"
       }
-    }));
-  } catch (err) {
-    console.error("[RoPhim Error]:", err);
+    });
+    
+    var html = searchRes.text();
+    var match = html.match(/href="(\/phim\/[^"]+)"/);
+    if (!match) return [];
+
+    var watchUrl = BASE_URL + match[1].replace("/phim/", "/xem-phim/");
+    if (mediaType === "tv" || mediaType === "series") {
+      watchUrl = watchUrl + "?ver=1&ss=" + (season || 1) + "&ep=" + (episode || 1);
+    }
+
+    var watchRes = fetch(watchUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": BASE_URL + "/"
+      }
+    });
+    
+    var watchHtml = watchRes.text();
+    var m3u8Regex = /https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/g;
+    var matches = watchHtml.match(m3u8Regex);
+    
+    if (!matches || matches.length === 0) return [];
+
+    var streams = [];
+    var checked = {};
+    
+    for (var i = 0; i < matches.length; i++) {
+      var link = matches[i].replace(/\\u002F/g, "/").replace(/\\/g, "");
+      if (!checked[link]) {
+        checked[link] = true;
+        streams.push({
+          name: "RoPhim",
+          title: "RoPhim - Server " + (streams.length + 1) + " (1080p)",
+          url: link,
+          quality: "1080p",
+          headers: {
+            "Referer": BASE_URL + "/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          }
+        });
+      }
+    }
+    
+    return streams;
+  } catch (e) {
     return [];
   }
 }
 
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { getStreams };
+  module.exports = { getStreams: getStreams };
 }
